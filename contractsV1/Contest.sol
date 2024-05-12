@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
+
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
@@ -12,10 +13,10 @@ contract Contest is Ownable {
     }
 
     error ContestNotActive();
-    error ContestNotEnded();
     error FeeTransferFailed();
     error SubmissionDoesNotExist();
     error AlreadyVoted();
+    error ContestNotEnded();
     error NoSubmissionsMade();
     error NoVotesCast();
     error WinnerPrizeTransferFailed();
@@ -77,11 +78,12 @@ contract Contest is Ownable {
             revert FeeTransferFailed();
         
         submissions.push(Submission({wallet: msg.sender, image: image, votes: 0}));
-        emit SubmissionMade(msg.sender, image);
+         emit SubmissionMade(msg.sender, image);
+       
     }
 
     function voteForSubmission(uint submissionIndex) public {
-        if (block.timestamp > endDateTime)  // Prevent voting after contest ends
+        if (!(block.timestamp >= startDateTime && block.timestamp <= endDateTime))
             revert ContestNotActive();
         
         if (submissionIndex >= submissions.length)
@@ -90,7 +92,8 @@ contract Contest is Ownable {
         if (hasVotedOnSubmission[submissionIndex][msg.sender])
             revert AlreadyVoted();
         
-        if (!dankToken.transferFrom(msg.sender, address(this), votingFee))
+        uint256 feeInDank = votingFee;
+        if (!dankToken.transferFrom(msg.sender, address(this), feeInDank))
             revert FeeTransferFailed();
         
         submissions[submissionIndex].votes++;
@@ -109,17 +112,13 @@ contract Contest is Ownable {
                 winningSubmissionIndices.push(submissionIndex);
             }
         }
-
-        // Set the voter as having voted for this submission.
-        hasVotedOnSubmission[submissionIndex][msg.sender] = true;
-
+        
         if (!voterRegistry[msg.sender]) {
             voterRegistry[msg.sender] = true;
             voters.push(msg.sender);
         }
         emit VoteCasted(msg.sender, submissionIndex, submissions[submissionIndex].image);
     }
-
 
     function endContest() public onlyOwner {
         if (block.timestamp < endDateTime)
@@ -160,10 +159,6 @@ contract Contest is Ownable {
     }
 
     function withdrawUnclaimedPrize() public onlyOwner {
-        // Check if the contest has ended
-        if (block.timestamp <= endDateTime)
-            revert ContestNotEnded();
-
         uint256 unclaimedPrize = dankToken.balanceOf(address(this));
         if (unclaimedPrize == 0)
             revert NoFundsToWithdraw();
