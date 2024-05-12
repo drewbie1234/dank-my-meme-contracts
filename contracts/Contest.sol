@@ -16,6 +16,7 @@ contract Contest is Ownable {
     error FeeTransferFailed();
     error SubmissionDoesNotExist();
     error AlreadyVoted();
+    error AlreadySubmitted();
     error NoSubmissionsMade();
     error NoVotesCast();
     error WinnerPrizeTransferFailed();
@@ -31,6 +32,7 @@ contract Contest is Ownable {
     uint256 public winnerPercentage;
     uint256 public numberOfLuckyVoters;
     Submission[] public submissions;
+    mapping(address => bool) public hasSubmitted;
     mapping(address => bool) public voterRegistry;
     address[] private voters;
     uint256[] private winningSubmissionIndices;
@@ -73,15 +75,19 @@ contract Contest is Ownable {
         if (!(block.timestamp >= startDateTime && block.timestamp <= endDateTime))
             revert ContestNotActive();
         
+        if (hasSubmitted[msg.sender])
+            revert AlreadySubmitted();
+
         if (!dankToken.transferFrom(msg.sender, address(this), entryFee))
             revert FeeTransferFailed();
         
         submissions.push(Submission({wallet: msg.sender, image: image, votes: 0}));
+        hasSubmitted[msg.sender] = true; // Mark the sender as having submitted
         emit SubmissionMade(msg.sender, image);
     }
 
     function voteForSubmission(uint submissionIndex) public {
-        if (block.timestamp > endDateTime)  // Prevent voting after contest ends
+        if (block.timestamp > endDateTime)
             revert ContestNotActive();
         
         if (submissionIndex >= submissions.length)
@@ -109,17 +115,13 @@ contract Contest is Ownable {
                 winningSubmissionIndices.push(submissionIndex);
             }
         }
-
-        // Set the voter as having voted for this submission.
-        hasVotedOnSubmission[submissionIndex][msg.sender] = true;
-
+        hasVotedOnSubmission[submissionIndex][msg.sender] = true; // Record that the user has voted for this submission
         if (!voterRegistry[msg.sender]) {
             voterRegistry[msg.sender] = true;
             voters.push(msg.sender);
         }
         emit VoteCasted(msg.sender, submissionIndex, submissions[submissionIndex].image);
     }
-
 
     function endContest() public onlyOwner {
         if (block.timestamp < endDateTime)
@@ -144,7 +146,6 @@ contract Contest is Ownable {
             address winnerAddress = submissions[winningSubmissionIndices[i]].wallet;
             emit ContestEnded(winnerAddress, winnerPrize, remainingPrize / numberOfLuckyVoters);
         }
-
     }
 
     function distributePrizeToLuckyVoters(uint256 remainingPrize) internal {
@@ -160,7 +161,6 @@ contract Contest is Ownable {
     }
 
     function withdrawUnclaimedPrize() public onlyOwner {
-        // Check if the contest has ended
         if (block.timestamp <= endDateTime)
             revert ContestNotEnded();
 
