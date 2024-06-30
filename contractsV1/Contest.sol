@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
-
+pragma solidity ^0.8.4;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
@@ -13,10 +12,11 @@ contract Contest is Ownable {
     }
 
     error ContestNotActive();
+    error ContestNotEnded();
     error FeeTransferFailed();
     error SubmissionDoesNotExist();
     error AlreadyVoted();
-    error ContestNotEnded();
+    error AlreadySubmitted();
     error NoSubmissionsMade();
     error NoVotesCast();
     error WinnerPrizeTransferFailed();
@@ -32,6 +32,7 @@ contract Contest is Ownable {
     uint256 public winnerPercentage;
     uint256 public numberOfLuckyVoters;
     Submission[] public submissions;
+    mapping(address => bool) public hasSubmitted;
     mapping(address => bool) public voterRegistry;
     address[] private voters;
     uint256[] private winningSubmissionIndices;
@@ -74,16 +75,19 @@ contract Contest is Ownable {
         if (!(block.timestamp >= startDateTime && block.timestamp <= endDateTime))
             revert ContestNotActive();
         
+        if (hasSubmitted[msg.sender])
+            revert AlreadySubmitted();
+
         if (!dankToken.transferFrom(msg.sender, address(this), entryFee))
             revert FeeTransferFailed();
         
         submissions.push(Submission({wallet: msg.sender, image: image, votes: 0}));
-         emit SubmissionMade(msg.sender, image);
-       
+        hasSubmitted[msg.sender] = true; // Mark the sender as having submitted
+        emit SubmissionMade(msg.sender, image);
     }
 
     function voteForSubmission(uint submissionIndex) public {
-        if (!(block.timestamp >= startDateTime && block.timestamp <= endDateTime))
+        if (block.timestamp > endDateTime)
             revert ContestNotActive();
         
         if (submissionIndex >= submissions.length)
@@ -92,8 +96,7 @@ contract Contest is Ownable {
         if (hasVotedOnSubmission[submissionIndex][msg.sender])
             revert AlreadyVoted();
         
-        uint256 feeInDank = votingFee;
-        if (!dankToken.transferFrom(msg.sender, address(this), feeInDank))
+        if (!dankToken.transferFrom(msg.sender, address(this), votingFee))
             revert FeeTransferFailed();
         
         submissions[submissionIndex].votes++;
@@ -112,7 +115,7 @@ contract Contest is Ownable {
                 winningSubmissionIndices.push(submissionIndex);
             }
         }
-        
+        hasVotedOnSubmission[submissionIndex][msg.sender] = true; // Record that the user has voted for this submission
         if (!voterRegistry[msg.sender]) {
             voterRegistry[msg.sender] = true;
             voters.push(msg.sender);
@@ -138,20 +141,24 @@ contract Contest is Ownable {
         }
 
         uint256 remainingPrize = totalPrize - (winnerPrize * winningSubmissionIndices.length);
-        distributePrizeToLuckyVoters(remainingPrize);
+        if (remainingPrize > 0) {
+            distributePrizeToLuckyVoters(remainingPrize);
+        }
+
         for (uint256 i = 0; i < winningSubmissionIndices.length; i++) {
             address winnerAddress = submissions[winningSubmissionIndices[i]].wallet;
             emit ContestEnded(winnerAddress, winnerPrize, remainingPrize / numberOfLuckyVoters);
         }
-
     }
 
     function distributePrizeToLuckyVoters(uint256 remainingPrize) internal {
         uint256 numberOfVoters = voters.length;
+        if (numberOfVoters == 0) return;
+
         uint256 numberOfPrizeWinners = numberOfLuckyVoters < numberOfVoters ? numberOfLuckyVoters : numberOfVoters;
         uint256 prizePerLuckyVoter = remainingPrize / numberOfPrizeWinners;
         for (uint256 i = 0; i < numberOfPrizeWinners; i++) {
-            uint256 randomIndex = uint256(keccak256(abi.encodePacked(block.timestamp, block.prevrandao, i))) % voters.length;
+            uint256 randomIndex = uint256(keccak256(abi.encodePacked(block.timestamp, block.difficulty, i))) % voters.length;
             address luckyVoter = voters[randomIndex];
             if (!dankToken.transfer(luckyVoter, prizePerLuckyVoter))
                 revert PrizeTransferFailed();
@@ -159,6 +166,9 @@ contract Contest is Ownable {
     }
 
     function withdrawUnclaimedPrize() public onlyOwner {
+        if (block.timestamp <= endDateTime)
+            revert ContestNotEnded();
+
         uint256 unclaimedPrize = dankToken.balanceOf(address(this));
         if (unclaimedPrize == 0)
             revert NoFundsToWithdraw();

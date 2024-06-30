@@ -1,11 +1,17 @@
-require("@nomicfoundation/hardhat-toolbox");
 require("@nomicfoundation/hardhat-chai-matchers");
+require("@nomicfoundation/hardhat-toolbox");
 
 module.exports = {
-  solidity: "0.8.24",
+  solidity: "0.8.4",
+  paths: {
+    sources: "./contractsV1", // Default: "./contracts"
+    tests: "./test", // Default: "./test"
+    cache: "./cache", // Default: "./cache"
+    artifacts: "./artifacts" // Default: "./artifacts"
+  },
   networks: {
     hardhat: {
-      // This is the default configuration; no need to specify anything unless needed
-    }
-  }
+      chainId: 1337,
+    },
+  },
 };
